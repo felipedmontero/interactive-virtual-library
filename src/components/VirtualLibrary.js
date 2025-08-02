@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Plus, Search, Grid, Bookmark, Star, Book, ArrowLeft } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Plus, Search, Grid, Bookmark, Star, Book, ArrowLeft, Upload, Download, FileSpreadsheet } from 'lucide-react';
+import { readExcelFile, parseExcelToBooks, exportBooksToExcel, createExcelTemplate } from '../utils/excelUtils';
 
 export default function VirtualLibrary() {
   const [books, setBooks] = useState([]);
@@ -10,6 +11,9 @@ export default function VirtualLibrary() {
   const [selectedGenre, setSelectedGenre] = useState('all');
   const [showBookDetail, setShowBookDetail] = useState(false);
   const [selectedBook, setSelectedBook] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [importMessage, setImportMessage] = useState('');
+  const fileInputRef = useRef(null);
 
   const [newBook, setNewBook] = useState({
     title: '',
@@ -358,6 +362,82 @@ export default function VirtualLibrary() {
     setBooks(sampleBooks);
   };
 
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+      setImportMessage('Por favor selecciona un archivo de Excel válido (.xlsx o .xls)');
+      return;
+    }
+
+    setIsLoading(true);
+    setImportMessage('');
+
+    try {
+      const excelData = await readExcelFile(file);
+      const newBooks = parseExcelToBooks(excelData);
+      
+      if (newBooks.length === 0) {
+        setImportMessage('No se encontraron libros válidos en el archivo Excel');
+        return;
+      }
+
+      const existingTitles = new Set(books.map(book => book.title.toLowerCase()));
+      const uniqueBooks = newBooks.filter(book => 
+        !existingTitles.has(book.title.toLowerCase())
+      );
+      
+      if (uniqueBooks.length === 0) {
+        setImportMessage('Todos los libros del archivo ya existen en tu biblioteca');
+      } else {
+        setBooks(prevBooks => [...prevBooks, ...uniqueBooks]);
+        setImportMessage(`Se importaron ${uniqueBooks.length} libros exitosamente. ${newBooks.length - uniqueBooks.length} libros ya existían.`);
+      }
+    } catch (error) {
+      console.error('Error al procesar el archivo:', error);
+      setImportMessage(`Error al procesar el archivo: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleExportBooks = () => {
+    if (books.length === 0) {
+      setImportMessage('No hay libros para exportar');
+      return;
+    }
+    
+    try {
+      exportBooksToExcel(books);
+      setImportMessage(`Se exportaron ${books.length} libros exitosamente`);
+    } catch (error) {
+      console.error('Error al exportar:', error);
+      setImportMessage('Error al exportar los libros');
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    try {
+      createExcelTemplate();
+      setImportMessage('Plantilla descargada exitosamente');
+    } catch (error) {
+      console.error('Error al descargar plantilla:', error);
+      setImportMessage('Error al descargar la plantilla');
+    }
+  };
+
+  const clearImportMessage = () => {
+    setTimeout(() => setImportMessage(''), 5000);
+  };
+
+  if (importMessage) {
+    clearImportMessage();
+  }
+
   const filteredBooks = books.filter(book => {
     const matchesSearch = book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          book.author.toLowerCase().includes(searchTerm.toLowerCase());
@@ -515,7 +595,7 @@ export default function VirtualLibrary() {
               <Book className="text-amber-600" />
               Mi Biblioteca Virtual
             </h1>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {books.length === 0 && (
                 <button
                   onClick={loadSampleData}
@@ -525,6 +605,7 @@ export default function VirtualLibrary() {
                   Cargar biblioteca de muestra
                 </button>
               )}
+              
               <button
                 onClick={() => setShowAddForm(true)}
                 className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors flex items-center gap-2"
@@ -532,8 +613,53 @@ export default function VirtualLibrary() {
                 <Plus size={20} />
                 Agregar Libro
               </button>
+              
+              <div className="relative">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:bg-gray-400"
+                >
+                  <Upload size={20} />
+                  {isLoading ? 'Importando...' : 'Importar Excel'}
+                </button>
+              </div>
+              
+              <button
+                onClick={handleExportBooks}
+                disabled={books.length === 0}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:bg-gray-400"
+              >
+                <Download size={20} />
+                Exportar Excel
+              </button>
+              
+              <button
+                onClick={handleDownloadTemplate}
+                className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+              >
+                <FileSpreadsheet size={20} />
+                Plantilla
+              </button>
             </div>
           </div>
+          
+          {importMessage && (
+            <div className={`mt-4 p-3 rounded-lg ${
+              importMessage.includes('Error') || importMessage.includes('error')
+                ? 'bg-red-100 text-red-700 border border-red-300'
+                : 'bg-green-100 text-green-700 border border-green-300'
+            }`}>
+              {importMessage}
+            </div>
+          )}
           
           <div className="flex flex-wrap gap-4 items-center">
             <div className="relative">
