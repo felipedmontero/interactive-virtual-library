@@ -182,6 +182,214 @@ const getStatusLabel = (status) => {
   }
 };
 
+// Conversor de CSV de Goodreads
+export const parseGoodreadsCSV = (csvText) => {
+  const lines = csvText.split('\n');
+  if (lines.length < 2) {
+    throw new Error('El archivo CSV debe tener al menos una fila de encabezados y una fila de datos');
+  }
+
+  // Parsear CSV manualmente para manejar comillas y comas dentro de campos
+  const parseCSVLine = (line) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    
+    result.push(current.trim());
+    return result;
+  };
+
+  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/"/g, ''));
+  
+  // Mapear columnas de Goodreads a nuestro formato
+  const titleIndex = findColumnIndex(headers, ['title', 'titulo']);
+  const authorIndex = findColumnIndex(headers, ['author', 'autor']);
+  const pagesIndex = findColumnIndex(headers, ['number of pages', 'paginas', 'pages']);
+  const ratingIndex = findColumnIndex(headers, ['my rating', 'calificacion', 'rating']);
+  const dateReadIndex = findColumnIndex(headers, ['date read', 'fecha leida', 'date added']);
+  const reviewIndex = findColumnIndex(headers, ['my review', 'review', 'notes']);
+  const shelvesIndex = findColumnIndex(headers, ['exclusive shelf', 'shelf', 'estado']);
+  
+  if (titleIndex === -1) {
+    throw new Error('No se encontró una columna de título en el CSV de Goodreads');
+  }
+
+  const books = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    
+    const row = parseCSVLine(lines[i]);
+    
+    if (!row[titleIndex]) continue;
+    
+    const title = row[titleIndex].replace(/"/g, '').trim();
+    if (!title) continue;
+
+    const book = {
+      id: Date.now() + i,
+      title: title,
+      author: authorIndex !== -1 && row[authorIndex] ? row[authorIndex].replace(/"/g, '').trim() : 'Autor desconocido',
+      pages: pagesIndex !== -1 ? parseInt(row[pagesIndex]) || 0 : 0,
+      genre: '',
+      status: parseGoodreadsStatus(shelvesIndex !== -1 ? row[shelvesIndex] : ''),
+      rating: ratingIndex !== -1 ? parseInt(row[ratingIndex]) || 0 : 0,
+      notes: reviewIndex !== -1 && row[reviewIndex] ? row[reviewIndex].replace(/"/g, '').trim() : '',
+      dateRead: dateReadIndex !== -1 ? parseGoodreadsDate(row[dateReadIndex]) : '',
+      dateAdded: new Date().toISOString().split('T')[0],
+      physical: true,
+      needsAPIData: pagesIndex === -1 || !row[pagesIndex] || parseInt(row[pagesIndex]) === 0
+    };
+    
+    if (book.rating > 5) book.rating = 5;
+    if (book.rating < 0) book.rating = 0;
+    
+    books.push(book);
+  }
+  
+  return books;
+};
+
+const parseGoodreadsStatus = (shelf) => {
+  if (!shelf) return 'toread';
+  
+  const shelfStr = shelf.toString().toLowerCase().replace(/"/g, '').trim();
+  
+  if (shelfStr.includes('read') && !shelfStr.includes('to-read')) {
+    return 'read';
+  }
+  
+  if (shelfStr.includes('currently-reading') || shelfStr.includes('reading')) {
+    return 'reading';
+  }
+  
+  return 'toread';
+};
+
+const parseGoodreadsDate = (dateValue) => {
+  if (!dateValue) return '';
+  
+  const cleanDate = dateValue.replace(/"/g, '').trim();
+  if (!cleanDate) return '';
+  
+  const date = new Date(cleanDate);
+  if (!isNaN(date.getTime())) {
+    return date.toISOString().split('T')[0];
+  }
+  
+  return '';
+};
+
+// Exportar a formato CSV de Goodreads
+export const exportToGoodreadsCSV = (books, filename = 'goodreads_import.csv') => {
+  // Encabezados exactos que espera Goodreads
+  const headers = [
+    'Title',
+    'Author',
+    'ISBN',
+    'My Rating',
+    'Average Rating', 
+    'Publisher',
+    'Binding',
+    'Number of Pages',
+    'Year Published',
+    'Original Publication Year',
+    'Date Read',
+    'Date Added',
+    'Bookshelves',
+    'Bookshelves with positions',
+    'Exclusive Shelf',
+    'My Review',
+    'Spoiler',
+    'Private Notes',
+    'Read Count',
+    'Recommended For',
+    'Recommended By',
+    'Owned Copies',
+    'Original Purchase Date',
+    'Original Purchase Location',
+    'Condition',
+    'Condition Description',
+    'BCID'
+  ];
+
+  const csvRows = [headers];
+
+  books.forEach(book => {
+    // Mapear estados a formato Goodreads
+    const getGoodreadsShelf = (status) => {
+      switch(status) {
+        case 'read': return 'read';
+        case 'reading': return 'currently-reading';
+        case 'toread': return 'to-read';
+        default: return 'to-read';
+      }
+    };
+
+    const row = [
+      `"${book.title.replace(/"/g, '""')}"`, // Title - escapar comillas
+      `"${book.author.replace(/"/g, '""')}"`, // Author
+      book.isbn || '', // ISBN
+      book.rating || '', // My Rating
+      '', // Average Rating
+      book.publisher || '', // Publisher  
+      book.physical ? 'Paperback' : 'ebook', // Binding
+      book.pages || '', // Number of Pages
+      book.publishedDate ? new Date(book.publishedDate).getFullYear() : '', // Year Published
+      '', // Original Publication Year
+      book.dateRead || '', // Date Read
+      book.dateAdded || new Date().toISOString().split('T')[0], // Date Added
+      '', // Bookshelves
+      '', // Bookshelves with positions
+      getGoodreadsShelf(book.status), // Exclusive Shelf
+      `"${(book.notes || '').replace(/"/g, '""')}"`, // My Review
+      '', // Spoiler
+      '', // Private Notes
+      book.status === 'read' ? 1 : '', // Read Count
+      '', // Recommended For
+      '', // Recommended By
+      book.physical ? 1 : 0, // Owned Copies
+      '', // Original Purchase Date
+      '', // Original Purchase Location
+      '', // Condition
+      '', // Condition Description
+      '' // BCID
+    ];
+
+    csvRows.push(row);
+  });
+
+  // Convertir a CSV
+  const csvContent = csvRows.map(row => row.join(',')).join('\n');
+  
+  // Crear y descargar archivo
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+};
+
 export const createExcelTemplate = () => {
   const templateData = [
     ['Titulo', 'Autor', 'Paginas', 'Genero', 'Estado', 'Calificacion', 'Notas', 'Fecha_Leido', 'Formato'],
