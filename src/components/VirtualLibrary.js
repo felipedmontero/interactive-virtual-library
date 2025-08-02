@@ -750,12 +750,49 @@ export default function VirtualLibrary() {
 
             {view === 'shelf' && (
               <div className="bg-gradient-to-b from-amber-900 to-amber-800 rounded-lg p-6 shadow-lg">
-                <div className="flex flex-wrap gap-1 items-end justify-center md:justify-start" style={{ perspective: '1000px' }}>
-                  {filteredBooks.map(book => (
-                    <BookSpine key={book.id} book={book} onClick={() => openBookDetail(book)} />
-                  ))}
-                </div>
-                <div className="w-full h-4 bg-gradient-to-r from-amber-700 to-amber-600 mt-2 rounded-b-lg shadow-inner"></div>
+                {(() => {
+                  // Organizar libros en filas basado en el ancho real que ocupan
+                  const containerWidth = window.innerWidth > 768 ? 
+                    Math.min(1280, window.innerWidth - 100) : // Desktop: max 1280px menos padding
+                    window.innerWidth - 60; // Mobile: menos padding
+                  
+                  const rows = [];
+                  let currentRow = [];
+                  let currentRowWidth = 0;
+                  const gap = 4; // 1 * 4px gap entre libros
+                  
+                  filteredBooks.forEach(book => {
+                    const bookWidth = getSpineWidth(book.pages);
+                    const bookWithGap = bookWidth + gap;
+                    
+                    // Si es el primer libro de la fila o si cabe en la fila actual
+                    if (currentRow.length === 0 || currentRowWidth + bookWithGap <= containerWidth) {
+                      currentRow.push(book);
+                      currentRowWidth += bookWithGap;
+                    } else {
+                      // No cabe más, empezar nueva fila
+                      rows.push(currentRow);
+                      currentRow = [book];
+                      currentRowWidth = bookWithGap;
+                    }
+                  });
+                  
+                  // Agregar la última fila si tiene libros
+                  if (currentRow.length > 0) {
+                    rows.push(currentRow);
+                  }
+                  
+                  return rows.map((rowBooks, rowIndex) => (
+                    <div key={rowIndex} className="mb-6">
+                      <div className="flex gap-1 items-end justify-center md:justify-start mb-2" style={{ perspective: '1000px' }}>
+                        {rowBooks.map(book => (
+                          <BookSpine key={book.id} book={book} onClick={() => openBookDetail(book)} />
+                        ))}
+                      </div>
+                      <div className="w-full h-4 bg-gradient-to-r from-amber-700 to-amber-600 rounded shadow-inner"></div>
+                    </div>
+                  ));
+                })()}
               </div>
             )}
 
